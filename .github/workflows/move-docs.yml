@@ -1,0 +1,83 @@
+name: Generate and Deploy IOTA Move Docs
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    # Definisce i permessi necessari alla Action per pushare su gh-pages
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup IOTA CLI
+        run: |
+          wget -qO iota.tgz "https://github.com/iotaledger/iota/releases/download/v1.17.2/iota-v1.17.2-linux-x86_64.tgz"
+          tar -xzf iota.tgz
+          mkdir -p ~/.local/bin
+          # La release ufficiale comprime un artefatto omonimo o contenuto in target/
+          find . -type f -name "iota" -exec cp {} ~/.local/bin/iota \;
+          chmod +x ~/.local/bin/iota
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify IOTA Installation
+        run: iota --version
+
+      - name: Fetch Custom Local Dependencies
+        run: |
+          # Fetch the modified _deps folder from Sernior's private repository
+          # Requires a Personal Access Token (PAT) stored in GitHub Secrets
+          git clone https://${{ secrets.GH_PAT_CLASSIC }}@github.com/Sernior/NPLEX-modified-dependencies.git _deps
+
+      - name: Build Move Documentation
+        run: iota move build --doc
+
+      - name: Configure GitHub Pages Layout & CSS
+        run: |
+          # The move compiler might generate a .nojekyll file, but since we are using 'just-the-docs' (a Jekyll theme),
+          # we desperately need Jekyll to run. Thus, we delete the .nojekyll file!
+          rm -f build/nplex/docs/.nojekyll
+
+          # Copy project README.md to be the root index of the docs
+          cp README.md build/nplex/docs/index.md
+
+          # Inject 'just-the-docs' theme (advanced doc theme with left sidebar and right TOC)
+          echo "remote_theme: just-the-docs/just-the-docs" > build/nplex/docs/_config.yml
+          echo "color_scheme: dark" >> build/nplex/docs/_config.yml
+          echo "nav_sort: case_insensitive" >> build/nplex/docs/_config.yml
+          echo "baseurl: /hackatonIOTA-MC" >> build/nplex/docs/_config.yml
+
+          # Prepare Frontmatter for the home page (README.md)
+          sed -i "1i---\nlayout: home\ntitle: Home\nnav_order: 1\n---\n" build/nplex/docs/index.md
+
+          # Create a Parent Category Page for the Move Modules so they spawn in the Sidebar
+          echo -e "---\nlayout: default\ntitle: Nplex Smart Contracts\nnav_order: 2\nhas_children: true\n---\n\nQuesta sezione contiene la documentazione tecnica dei moduli Move." > build/nplex/docs/modules_index.md
+
+          # Prepare Jekyll Frontmatter for sidebar navigation (tree view)
+          # We add this to every Move module markdown file
+          for md in build/nplex/docs/nplex/*.md; do
+            filename=$(basename "$md" .md)
+            # Prepend frontmatter using sed so it appears inside the left sidebar hierarchy
+            sed -i "1i---\nlayout: default\ntitle: $filename\nparent: Nplex Smart Contracts\n---\n" "$md"
+          done
+
+      - name: Deploy to GitHub Pages
+        # Run deploy only on push to main, skip on PRs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/nplex/docs/
+          publish_branch: gh-pages
+          force_orphan: true
+          enable_jekyll: true

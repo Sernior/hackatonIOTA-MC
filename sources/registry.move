@@ -228,10 +228,25 @@ fun init(otw: REGISTRY, ctx: &mut TxContext) {
 // ==================== Admin Functions ====================
 
 /// Register a new approved notarization in the registry
-/// These are the documents which are used only for create_contract
-/// Notarizations for other approvals are managed in other tables not in approved_notarizations
-/// A note on this: The fact that we pass notarization_id and document_hash instead of the notarization object is because
-/// the locked notarization object cannot be traded. The user has to create it and have it audited then pass it to the create_contract function.
+/// 
+/// These are the documents which are used only for `create_contract`.
+/// Notarizations for other approvals are managed in other tables, not in `approved_notarizations`.
+///
+/// **Note:** We pass `notarization_id` and `document_hash` instead of the `Notarization` object
+/// because the locked Notarization object cannot be traded. The user must create it via SDK,
+/// have it audited off-chain, and then pass it to the `create_contract` function.
+///
+/// # Arguments
+/// * `registry` - The NPLEX Registry shared object.
+/// * `_admin_cap` - The NPLEX Administrator Capability (authorization).
+/// * `notarization_id` - The `ID` of the Notarization object created via SDK.
+/// * `document_hash` - The `u256` SHA256/Keccak hash of the off-chain PDF asset document.
+/// * `authorized_creator` - The address allowed to consume this hash to create an LTC1.
+/// * `clock` - The system clock for auditing timestamp.
+/// * `ctx` - Transaction context.
+///
+/// # Aborts
+/// * `E_NOTARIZATION_ALREADY_USED` - If the `notarization_id` is already registered.
 public entry fun register_notarization(
     registry: &mut NPLEXRegistry,
     _admin_cap: &NPLEXAdminCap,
@@ -458,7 +473,25 @@ public entry fun revoke_identity(
 
 // ==================== Validation Functions ====================
 
-/// Claim a notarization to start usage flow
+/// Claim a notarization to start the package creation flow
+///
+/// Consumes an approved notarization and returns a "Hot Potato" `NotarizationClaim` 
+/// that must be immediately bound to a new contract via `bind_executor`.
+///
+/// # Arguments
+/// * `registry` - The NPLEX Registry shared object.
+/// * `notarization_id` - The ID of the notarization being claimed.
+/// * `document_hash` - The hash of the document, must match the registered one.
+/// * `ctx` - Transaction context.
+///
+/// # Returns
+/// * `NotarizationClaim` - A Hot Potato struct containing the hash and ID.
+///
+/// # Aborts
+/// * `E_NOTARIZATION_NOT_APPROVED` - If not found or `document_hash` mismatches.
+/// * `E_NOTARIZATION_REVOKED` - If it was revoked by NPLEX Admin.
+/// * `E_NOTARIZATION_ALREADY_USED` - If it was already bound to a contract.
+/// * `E_UNAUTHORIZED_CREATOR` - If the caller is not the `authorized_creator`.
 public fun claim_notarization(
     registry: &mut NPLEXRegistry,
     notarization_id: ID,

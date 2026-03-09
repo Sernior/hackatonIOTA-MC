@@ -113,6 +113,10 @@ public struct LTC1Package<phantom T> has key {
 
 // ==================== Initialization ====================
 
+/// Module initializer.
+/// Automatically called when the package is published. Sets up the 
+/// IOTA Display standard for `LTC1Token` objects.
+
 #[allow(lint(share_owned))]
 fun init(otw: LTC1, ctx: &mut iota::tx_context::TxContext) {
     // 1. Claim Publisher
@@ -141,6 +145,28 @@ fun init(otw: LTC1, ctx: &mut iota::tx_context::TxContext) {
 }
 
 // ==================== Public Functions ====================
+
+/// Creates a new LTC1 Package (NPL Fractionalization Contract)
+/// 
+/// This is the entry point for Originators to tokenize an NPL package.
+/// 
+/// # Arguments
+/// * `registry` - The NPLEX Registry shared object, used to verify authorization.
+/// * `name` - The display name of the NPL Package.
+/// * `notarization` - The IOTA SDK Notarization object bounding the off-chain documents to this contract.
+/// * `total_supply` - The total number of token shares to emit (must be >= `MIN_SUPPLY`).
+/// * `token_price` - The price of a single token share in NANOS (1,000,000,000 = 1 IOTA).
+/// * `nominal_value` - The gross book value (GBV) of the underlying NPL package.
+/// * `investor_split_bps` - The percentage of future revenue destined to investors (in Basis Points).
+/// * `metadata_uri` - A link (e.g., IPFS) to the prospectus or public metadata.
+/// * `owner_identity` - The Decentralized Identifier (DID) of the Originator/Servicer.
+/// * `token` - The sender's `DelegationToken` proving their `ROLE_INSTITUTION` authority.
+/// * `clock` - The IOTA system clock for timestamping.
+///
+/// # Aborts
+/// * `E_INVALID_SPLIT` - if `investor_split_bps` > `MAX_INVESTOR_BPS`.
+/// * `E_SUPPLY_TOO_LOW` - if `total_supply` < `MIN_SUPPLY`.
+/// * Reverts if the `DelegationToken` does not authorize the caller as an Institution.
 
 public entry fun create_contract<T>(
     registry: &mut NPLEXRegistry,
@@ -230,9 +256,26 @@ public entry fun create_contract<T>(
     );
 }
 
-/// Buy tokens from the package
-/// User specifies how many "shares" they want to buy (`amount`)
-/// and provides the Payment in IOTA.
+/// Purchase tokens (fractional shares) from the package
+///
+/// Investors use this function to finance the NPL package by acquiring `LTC1Token` shares.
+/// 
+/// # Arguments
+/// * `registry` - The NPLEX Registry to verify the investor's identity.
+/// * `package` - The `LTC1Package` offering the tokens.
+/// * `payment` - An IOTA `Coin` used to pay for the tokens. Change is refunded.
+/// * `amount` - The number of tokens requested.
+/// * `token` - The sender's `DelegationToken` proving their `ROLE_INVESTOR` authority.
+///
+/// # Logic
+/// Implements "Dividend-stripping protection" by pre-calculating the `initial_claimed`
+/// revenue. This ensures the new investor cannot claim past revenue that was generated 
+/// before they bought the token. The past revenue is credited to the Originator.
+/// 
+/// # Aborts
+/// * `E_SALES_CLOSED` - if the package sales are not active.
+/// * `E_INSUFFICIENT_SUPPLY` - if the requested `amount` exceeds the `max_sellable_supply`.
+/// * `E_INSUFFICIENT_PAYMENT` - if the `payment` coin value is lower than the required cost.
 public entry fun buy_token<T>(
     registry: &NPLEXRegistry,
     package: &mut LTC1Package<T>,
